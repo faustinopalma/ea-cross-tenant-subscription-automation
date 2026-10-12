@@ -1,0 +1,26 @@
+# Credentials and local configuration
+*.pfx
+*.p12
+*.pem
+*.key
+*.cer
+*.crt
+.env
+.env.*
+*.local.ps1
+*.local.json
+*.secrets.*
+
+# Local execution evidence and generated artifacts
+pester-results.xml
+TestResults/
+*.log
+*.clixml
+build/
+.azure/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
