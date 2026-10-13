@@ -1,5 +1,7 @@
 # EA Cross-Tenant Subscription - v2.0
 
+For the cloud runbook, follow [DEPLOYMENT.md](DEPLOYMENT.md). The commands below cover direct engine and local-launcher testing.
+
 ## Single-Command Execution (October 10, 2026)
 
 [New-EASubscriptionCrossTenant.OneTouch.ps1](New-EASubscriptionCrossTenant.OneTouch.ps1) authenticates both service principals and runs v2 in `CreateAndAccept` mode. The destination principal becomes Owner; billing stays on the selected EA enrollment. See the [README](README.md) for the Automation architecture.
@@ -83,6 +85,9 @@ Install-Module Az.Accounts -Scope CurrentUser
 Install-Module Pester -MinimumVersion 5.0.0 -MaximumVersion 5.999.999 -Scope CurrentUser
 Import-Module Pester -MinimumVersion 5.0.0 -MaximumVersion 5.999.999
 
+bicep build infra/main.bicep --outfile build/main.json
+if ($LASTEXITCODE -ne 0) { throw 'Bicep compilation failed.' }
+
 # Parse the production script without running it.
 $tokens = $null
 $parseErrors = $null
@@ -106,7 +111,7 @@ $result = Invoke-Pester -Configuration $config
 if ($result.Result -ne 'Passed') { throw 'Do not proceed: offline tests failed.' }
 ```
 
-The suite mocks tokens, HTTP, certificate lookup, sign-in, and polling waits. Coverage includes identities, context separation, certificate validity, existing aliases, recovery, interrupted writes, 429/Retry-After, deadlines, and final state. Verify real authentication, policies, and service behavior during acceptance testing.
+The suite mocks tokens, HTTP, certificate lookup, sign-in, and polling waits. Coverage includes the engine, local launcher, built cloud artifact, request leases, recovery, and compiled infrastructure security properties. GitHub Actions runs the suite independently of the local signing-policy blocker. Verify real authentication, policies, and service behavior during acceptance testing.
 
 ## 2. Authentication and Configuration
 

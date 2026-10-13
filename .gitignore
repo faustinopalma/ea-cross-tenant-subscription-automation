@@ -9,6 +9,7 @@
 .env.*
 *.local.ps1
 *.local.json
+*.local.bicepparam
 *.secrets.*
 
 # Local execution evidence and generated artifacts

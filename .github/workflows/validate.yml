@@ -1,0 +1,44 @@
+name: Validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Compile Bicep
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path build -Force | Out-Null
+          az bicep install --version v0.42.1
+          if ($LASTEXITCODE -ne 0) { throw 'Bicep installation failed.' }
+          az bicep build --file infra/main.bicep --outfile build/main.json
+          if ($LASTEXITCODE -ne 0) { throw 'Bicep compilation failed.' }
+          az bicep build-params --file infra/main.bicepparam --outfile build/main.parameters.json
+          if ($LASTEXITCODE -ne 0) { throw 'Parameter compilation failed.' }
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          Install-Module Az.Accounts -RequiredVersion 5.3.1 -Scope CurrentUser -Force
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force
+      - name: Run offline tests
+        shell: pwsh
+        run: |
+          Import-Module Pester -RequiredVersion 5.7.1
+          $config = New-PesterConfiguration
+          $config.Run.Path = './New-EASubscriptionCrossTenant.v2.Tests.ps1'
+          $config.Run.PassThru = $true
+          $config.Output.Verbosity = 'Detailed'
+          $result = Invoke-Pester -Configuration $config
+          if ($result.TotalCount -eq 0 -or $result.Result -ne 'Passed') {
+            throw 'Offline suite did not pass with nonzero executed tests.'
+          }

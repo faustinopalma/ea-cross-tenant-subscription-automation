@@ -2,46 +2,54 @@
 
 Create a new Azure subscription in a destination Microsoft Entra tenant, billed to an existing Enterprise Agreement (EA) enrollment account. The engine specifies the destination tenant during creation, accepts ownership there, and verifies the subscription is `Enabled`.
 
-**Available:** PowerShell engine, local certificate-authentication launcher, and mocked tests. **To implement:** Automation runbook adapter, infrastructure, persistent request state, locks, and scheduled reconciliation. Parsing and static checks passed; Pester discovery was blocked by unsigned-script policy. Live authentication and subscription creation require acceptance testing.
+**Included:** Bicep infrastructure, native Automation runbook, build/publish utility, execution engine, and mocked tests. Follow [DEPLOYMENT.md](DEPLOYMENT.md) for setup. The validation workflow compiles Bicep and runs offline tests; live authentication and subscription creation require acceptance testing.
 
 ## Architecture
 
 ```mermaid
-flowchart LR
+flowchart TB
     Operator[Authorized operator]
-    subgraph Source[Source tenant - EA and management]
-        Portal[Azure portal - Runbook Start]
-        Automation[Dedicated Automation Account\nPowerShell runbook]
-        Credentials[Protected certificate assets\nSource and destination credentials]
-        State[Private persistent request store\nAlias, state, lock, result]
-        SourceSP[Source service principal\nEA SubscriptionCreator]
-        EA[Existing EA enrollment account\nBilling remains here]
+    subgraph Source[Source tenant - existing management subscription]
+        Portal[Azure portal<br/>Runbooks - Start]
+        Automation[Automation Account<br/>Published PowerShell runbook]
+        Portal --> Automation
     end
-    ARM[Microsoft.Subscription APIs]
+    ARM[Microsoft.Subscription API<br/>Create - accept - verify]
     subgraph Destination[Destination tenant]
-        TargetSP[Destination service principal\nAccept ownership]
-        Subscription[New subscription\nDestination directory - Enabled]
+        Subscription[New subscription<br/>Owner: destination service principal<br/>Billing: source EA enrollment]
     end
-    Operator --> Portal --> Automation
-    Credentials --> Automation
-    Automation <--> State
-    Automation -->|Source context| SourceSP
-    SourceSP -->|Create alias for destination tenant| ARM
-    EA -.->|Billing association| Subscription
-    Automation -->|Destination context| TargetSP
-    TargetSP -->|Accept and verify| ARM
+    Operator --> Portal
+    Automation -->|Two authenticated contexts| ARM
     ARM --> Subscription
 ```
 
-In the target architecture, an operator enters the subscription name and stable alias in the Azure portal and selects **Start**. A dedicated Automation Account in an existing source-tenant management subscription executes the runbook using two protected application credentials.
+Use the native Azure portal: **Automation Account → Runbooks → Start**. The operator fills in the runbook parameters and follows the job output. The runbook performs creation, acceptance, and verification in one execution.
 
-| Component | Responsibility |
+### Components
+
+| Component | Location and purpose |
 | --- | --- |
-| Source principal | Application registered in its home tenant; EA billing `SubscriptionCreator` on the selected enrollment account. Role ID: `a0bcee42-bf30-4d1b-926a-48d21664ef71`. |
-| Destination principal | Authenticates in the final tenant and becomes subscription Owner. Use its Enterprise application Object ID as `TargetOwnerObjectId`. |
-| Certificate assets | Store both private-key certificates; register the corresponding public certificates on the applications. |
-| Request store | Persist alias, parameters, request fingerprint, subscription ID, progress, lock, and outcome. |
-| Operator | Starts approved jobs and reads results. Keep code and credential administration separate. |
+| Automation Account | One account in an existing source-tenant management subscription. Hosts the runbook, PowerShell runtime, configuration, certificate assets, and job history. |
+| PowerShell runbook | Published executable code inside the Automation Account. Retrieves credentials, authenticates both principals, and invokes the v2 engine. |
+| Two certificate assets | Protected assets inside the Automation Account, one for each application. Hold private keys; matching public certificates are registered on the applications. |
+| Source service principal | Application identity in the source tenant. Creates subscriptions under the selected EA enrollment account using billing role `SubscriptionCreator`, ID `a0bcee42-bf30-4d1b-926a-48d21664ef71`. |
+| Destination service principal | Application identity in the destination tenant. Accepts ownership and becomes Owner of the new subscription. Its Enterprise application Object ID is `TargetOwnerObjectId`. |
+| EA enrollment account | Existing billing scope in the source environment. Pays for the new subscription after creation and acceptance. |
+| Request storage | One Azure Storage account with an authenticated Blob container. Stores request parameters, hash, execution state, and final result. An infinite-duration blob lease locks each alias until the job releases it. |
+| Automation managed identity | Authenticates access to request storage. Grant only the required storage data permissions at container scope. |
+
+The two service principals supply authorization; the certificates authenticate them. Automation job history shows execution output, while request storage retains recovery state across jobs. The cloud sandbox accesses Storage over its public HTTPS endpoint using Entra/RBAC; anonymous access and shared keys are disabled.
+
+### Native Start Form
+
+| Operator input | Purpose |
+| --- | --- |
+| `SubscriptionName` | Display name of the new subscription. |
+| `AliasName` | Stable request identifier, retained for verification and recovery. |
+| `Workload` | `Production` or an enabled `DevTest` offer. |
+| `Mode` | `Validate` (cloud default), `CreateAndAccept`, `Verify`, or `Resume`. |
+
+Administrators fix tenant IDs, application IDs, destination owner ID, certificate asset names, and the approved EA enrollment in Automation configuration. Operators receive permission to start jobs and read results; maintainers control code and credentials.
 
 ## Execution Flow
 
@@ -50,7 +58,7 @@ In the target architecture, an operator enters the subscription name and stable 
 3. Wait for the subscription ID, accept ownership using the destination context, and poll completion.
 4. Read the subscription and verify its ID, tenant, and `Enabled` state.
 
-The cloud adapter must wrap this engine with per-alias locking, durable request records, and scheduled recovery. Until then, operators must enforce a single execution per alias. Team access to the resulting subscription requires a separate role assignment.
+The runbook locks the request before subscription writes and saves its outcome. `Validate` and `Verify` use read-only requests. Operators inspect and recover unfinished requests through the same Start form. Team access to the resulting subscription requires a separate role assignment.
 
 ## Security
 
@@ -72,24 +80,29 @@ Keep the same alias and parameters after a timeout or interrupted write: Azure m
 | `Verify` | Read-only inspection of an existing request. |
 | `Resume` | Continues an existing alias; creation PUT is disabled. |
 
-The cloud adapter must survive job interruption and the sandbox's three-hour runtime limit. Persist progress outside the job and require final subscription verification before recording success.
+An interrupted job can leave its infinite-duration lease held. Run `Verify`, stop all jobs for that alias, and have a storage administrator release the lease through **Break lease** in the Azure portal. Review the remote operation before selecting `Resume`. A `NeedsReview` record prevents creation replay. See [DEPLOYMENT.md](DEPLOYMENT.md) for the recovery procedure.
 
 ## Repository Contents
 
 | File | Purpose |
 | --- | --- |
+| [infra/main.bicep](infra/main.bicep) | Automation Account, PowerShell 7.4 runtime, storage, container-scoped RBAC, configuration, and runbook draft. |
+| [infra/main.bicepparam](infra/main.bicepparam) | Synthetic deployment parameter example. |
+| [automation/Runbook.template.ps1](automation/Runbook.template.ps1) | Cloud authentication, request records, and locking; built with the engine before publication. |
+| [Publish-EAAutomationRunbook.ps1](Publish-EAAutomationRunbook.ps1) | Builds the standalone artifact; optionally uploads, publishes, and verifies its content. |
 | [New-EASubscriptionCrossTenant.v2.ps1](New-EASubscriptionCrossTenant.v2.ps1) | Current execution engine; accepts preauthenticated source/destination contexts. |
-| [New-EASubscriptionCrossTenant.OneTouch.ps1](New-EASubscriptionCrossTenant.OneTouch.ps1) | Local Windows launcher using `Cert:\CurrentUser\My`. |
-| [New-EASubscriptionCrossTenant.v2.Tests.ps1](New-EASubscriptionCrossTenant.v2.Tests.ps1) | Mocked Pester tests for the engine and local launcher. |
+| [New-EASubscriptionCrossTenant.OneTouch.ps1](New-EASubscriptionCrossTenant.OneTouch.ps1) | Local Windows launcher for pilot testing using `Cert:\CurrentUser\My`. |
+| [New-EASubscriptionCrossTenant.v2.Tests.ps1](New-EASubscriptionCrossTenant.v2.Tests.ps1) | Engine, local launcher, cloud artifact, and compiled infrastructure tests. |
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Infrastructure deployment, certificate setup, publication, native Start form, and recovery. |
 | [TESTING-AND-EVIDENCE.md](TESTING-AND-EVIDENCE.md) | Prerequisites, invocation examples, recovery, evidence, and official references. |
 | [RECOMMENDED-APPROACH.md](RECOMMENDED-APPROACH.md) | Local pilot setup and implementation decisions. |
-| [New-EASubscriptionCrossTenant.ps1](New-EASubscriptionCrossTenant.ps1) | Historical v1 example, retained for comparison; use v2 for new work. |
 
 ## Local Evaluation
 
 Use a dedicated Windows PowerShell 7.2+ session, `Az.Accounts` 5.3.1+, Pester 5, and approved script execution/signing policy. Follow [TESTING-AND-EVIDENCE.md](TESTING-AND-EVIDENCE.md) for setup and invocation: offline `WhatIf`, read-only `Validate`, then an approved `CreateAndAccept` run. Creation produces a real, billable subscription.
 
 ```powershell
+bicep build infra/main.bicep --outfile build/main.json
 Invoke-Pester -Path ./New-EASubscriptionCrossTenant.v2.Tests.ps1 -Output Detailed
 ```
 

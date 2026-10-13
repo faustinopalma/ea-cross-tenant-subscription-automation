@@ -11,6 +11,8 @@ Use [New-EASubscriptionCrossTenant.OneTouch.ps1](New-EASubscriptionCrossTenant.O
 | Destination tenant in the alias request | Creates the new subscription for its final directory while retaining EA billing. |
 | Shared v2 engine | Keeps identity checks, polling, recovery, and final verification in one implementation. |
 | Stable request alias | Supports inspection and recovery after an interrupted write. |
+| Native Automation Start form | Provides operator inputs, job execution, and output through the existing Azure portal. |
+| Automation assets and Blob storage | Keep configuration and protected certificates with the runbook; retain request state and per-alias leases in one storage container. |
 
 Administrators prepare the principals, EA billing role, certificates, and tenant policies. Operators retain the request parameters and enforce one process per alias. Plan destination group access and certificate renewal before operational use.
 
