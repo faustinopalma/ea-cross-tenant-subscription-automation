@@ -30,7 +30,7 @@ Use the native Azure portal: **Automation Account → Runbooks → Start**. The 
 | Component | Location and purpose |
 | --- | --- |
 | Automation Account | One account in an existing source-tenant management subscription. Hosts the runbook, PowerShell runtime, configuration, certificate assets, and job history. |
-| PowerShell runbook | Published executable code inside the Automation Account. Retrieves credentials, authenticates both principals, and invokes the v2 engine. |
+| PowerShell runbook | Published executable code inside the Automation Account. Retrieves credentials, authenticates both principals, and invokes the subscription engine. |
 | Two certificate assets | Protected assets inside the Automation Account, one for each application. Hold private keys; matching public certificates are registered on the applications. |
 | Source service principal | Application identity in the source tenant. Creates subscriptions under the selected EA enrollment account using billing role `SubscriptionCreator`, ID `a0bcee42-bf30-4d1b-926a-48d21664ef71`. |
 | Destination service principal | Application identity in the destination tenant. Accepts ownership and becomes Owner of the new subscription. Its Enterprise application Object ID is `TargetOwnerObjectId`. |
@@ -76,7 +76,7 @@ Keep the same alias and parameters after a timeout or interrupted write: Azure m
 | Mode | Engine behavior |
 | --- | --- |
 | `Validate` | Identity checks and read-only API calls. Default for direct engine invocation. Creation permission requires separate EA role verification. |
-| `CreateAndAccept` | Creates a new request and accepts ownership. Default for the local OneTouch launcher. |
+| `CreateAndAccept` | Creates a new request and accepts ownership. |
 | `Verify` | Read-only inspection of an existing request. |
 | `Resume` | Continues an existing alias; creation PUT is disabled. |
 
@@ -90,20 +90,19 @@ An interrupted job can leave its infinite-duration lease held. Run `Verify`, sto
 | [infra/main.bicepparam](infra/main.bicepparam) | Synthetic deployment parameter example. |
 | [automation/Runbook.template.ps1](automation/Runbook.template.ps1) | Cloud authentication, request records, and locking; built with the engine before publication. |
 | [Publish-EAAutomationRunbook.ps1](Publish-EAAutomationRunbook.ps1) | Builds the standalone artifact; optionally uploads, publishes, and verifies its content. |
-| [New-EASubscriptionCrossTenant.v2.ps1](New-EASubscriptionCrossTenant.v2.ps1) | Current execution engine; accepts preauthenticated source/destination contexts. |
-| [New-EASubscriptionCrossTenant.OneTouch.ps1](New-EASubscriptionCrossTenant.OneTouch.ps1) | Local Windows launcher for pilot testing using `Cert:\CurrentUser\My`. |
-| [New-EASubscriptionCrossTenant.v2.Tests.ps1](New-EASubscriptionCrossTenant.v2.Tests.ps1) | Engine, local launcher, cloud artifact, and compiled infrastructure tests. |
+| [New-EASubscription.ps1](New-EASubscription.ps1) | Execution engine embedded in the cloud artifact. |
+| [New-EASubscription.Tests.ps1](New-EASubscription.Tests.ps1) | Engine, cloud artifact, and compiled infrastructure tests. |
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Infrastructure deployment, certificate setup, publication, native Start form, and recovery. |
-| [TESTING-AND-EVIDENCE.md](TESTING-AND-EVIDENCE.md) | Prerequisites, invocation examples, recovery, evidence, and official references. |
-| [RECOMMENDED-APPROACH.md](RECOMMENDED-APPROACH.md) | Local pilot setup and implementation decisions. |
 
 ## Local Evaluation
 
-Use a dedicated Windows PowerShell 7.4+ session, `Az.Accounts` 5.3.1+, Pester 5, and approved script execution/signing policy. Follow [TESTING-AND-EVIDENCE.md](TESTING-AND-EVIDENCE.md) for setup and invocation: offline `WhatIf`, read-only `Validate`, then an approved `CreateAndAccept` run. Creation produces a real, billable subscription.
+Use PowerShell 7.4+, `Az.Accounts` 5.3.1+, Pester 5, and approved script execution/signing policy. Compile the infrastructure before running the mocked suite:
 
 ```powershell
+New-Item -ItemType Directory -Path build -Force | Out-Null
+bicep build-params infra/main.bicepparam --outfile build/main.parameters.json
 bicep build infra/main.bicep --outfile build/main.json
-Invoke-Pester -Path ./New-EASubscriptionCrossTenant.v2.Tests.ps1 -Output Detailed
+Invoke-Pester -Path ./New-EASubscription.Tests.ps1 -Output Detailed
 ```
 
 Acceptance requires passing offline tests with nonzero execution, runtime authentication/recovery/concurrency checks, and one approved real creation. Independently verify destination IAM and source EA billing in addition to the engine's final subscription read. Retain results and the exact artifact version.

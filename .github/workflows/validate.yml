@@ -35,7 +35,7 @@ jobs:
         run: |
           Import-Module Pester -RequiredVersion 5.7.1
           $config = New-PesterConfiguration
-          $config.Run.Path = './New-EASubscriptionCrossTenant.v2.Tests.ps1'
+          $config.Run.Path = './New-EASubscription.Tests.ps1'
           $config.Run.PassThru = $true
           $config.Output.Verbosity = 'Detailed'
           $result = Invoke-Pester -Configuration $config

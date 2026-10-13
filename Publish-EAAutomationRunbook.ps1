@@ -7,7 +7,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $template = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'automation/Runbook.template.ps1'))
-$engine = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'New-EASubscriptionCrossTenant.v2.ps1'))
+$engine = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'New-EASubscription.ps1'))
 $engineTokens = $null
 $engineErrors = $null
 $engineAst = [Management.Automation.Language.Parser]::ParseInput($engine, [ref]$engineTokens, [ref]$engineErrors)

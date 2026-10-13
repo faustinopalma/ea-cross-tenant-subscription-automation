@@ -5,7 +5,8 @@ Deploy into an existing management resource group in the source tenant. The solu
 ## Prepare
 
 - Use PowerShell 7.4+, Bicep CLI 0.42.1+, Az.Accounts 5.3.1+, and Az.Resources. Follow organizational signing policy.
-- Prepare the two application identities, public certificate registrations, EA billing role, and tenant policies described in [TESTING-AND-EVIDENCE.md](TESTING-AND-EVIDENCE.md).
+- Register the source application in its home tenant and the destination application in the final tenant. Have the EA administrator assign source billing `SubscriptionCreator`, role ID `a0bcee42-bf30-4d1b-926a-48d21664ef71`, on the selected enrollment account using [EA role guidance](https://learn.microsoft.com/azure/cost-management-billing/manage/assign-roles-azure-service-principals).
+- Use the destination Enterprise application's Object ID as `targetOwnerObjectId`. Register the corresponding public certificates on both applications; verify enrollment status, creation limits, and both tenants' policies. `DevTest` requires the enabled EA offer.
 - Use a deployer authorized to create resources and role assignments in the management resource group. The management subscription's tenant must match `eaTenantId`.
 - Check regional availability of Automation PowerShell 7.4 runtime environments and the Storage SKU. Azure Policy must allow the authenticated public Storage endpoint used by the cloud sandbox. Mandatory private networking requires a Hybrid Worker design.
 - Budget for Automation execution minutes and Storage capacity, transactions, and retained versions. This deployment creates no billable EA subscription; that operation starts when an operator selects `CreateAndAccept`.
@@ -56,7 +57,7 @@ The runbook retrieves protected assets, exports a short-lived password-encrypted
     -RunbookResourceId $deployment.Outputs.runbookResourceId.Value
 ```
 
-The publisher embeds the current v2 engine in `build/New-EASubscription.ps1`, verifies draft content, publishes it, and compares the published content with the local artifact. Retain its SHA256. Publish through an approved change process after offline tests pass. Importing the template directly leaves the engine marker unresolved; use the generated artifact.
+The publisher embeds [New-EASubscription.ps1](New-EASubscription.ps1) in `build/New-EASubscription.ps1`, verifies draft content, publishes it, and compares the published content with the local artifact. Retain its SHA256. Publish through an approved change process after offline tests pass. Importing the template directly leaves the engine marker unresolved; use the generated artifact.
 
 ## Start a Request
 

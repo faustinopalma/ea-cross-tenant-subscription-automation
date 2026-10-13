@@ -26,7 +26,7 @@ This is a new-subscription cross-tenant request, not a Change Directory operatio
 on an existing populated subscription. There is no transactional rollback.
 
 .NOTES
-See TESTING-AND-EVIDENCE.md for authentication examples, tests and API references.
+See DEPLOYMENT.md for setup, operation, tests and recovery.
 Documentation is evidence for the contracts, not an end-to-end certification.
 The source Graph self-read verifies appOwnerOrganizationId. Microsoft documents
 that a service principal can read its own details without application permissions.

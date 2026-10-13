@@ -5,7 +5,7 @@
 
 BeforeAll {
     Import-Module Az.Accounts
-    $script:UnderTest = Join-Path $PSScriptRoot 'New-EASubscriptionCrossTenant.v2.ps1'
+    $script:UnderTest = Join-Path $PSScriptRoot 'New-EASubscription.ps1'
     function New-FakeResponse {
         param([int]$Code, [hashtable]$Data = @{}, [hashtable]$Headers = @{})
         [pscustomobject]@{ StatusCode = $Code; Content = ($Data | ConvertTo-Json -Depth 15); Headers = $Headers }
@@ -257,136 +257,7 @@ Describe 'EA cross-tenant subscription v2' {
     }
 }
 
-Describe 'EA cross-tenant one-touch launcher' {
-    BeforeAll {
-        $script:LauncherFixtureRoot = Join-Path $TestDrive 'launcher'
-        $null = New-Item -ItemType Directory -Path $script:LauncherFixtureRoot
-        $script:LauncherUnderTest = Join-Path $script:LauncherFixtureRoot 'New-EASubscriptionCrossTenant.OneTouch.ps1'
-        Copy-Item (Join-Path $PSScriptRoot 'New-EASubscriptionCrossTenant.OneTouch.ps1') $script:LauncherUnderTest
-        $fixtureCore = @'
-[CmdletBinding(SupportsShouldProcess)]
-param($SourceContext, $TargetContext, $EATenantId, $TargetTenantId,
-    $TargetOwnerObjectId, $BillingAccountId, $EnrollmentAccountId,
-    $SubscriptionName, $AliasName, $Workload, $Mode, $TimeoutMinutes)
-if ($AliasName -eq 'fixture-failure') { throw 'Synthetic core failure' }
-[pscustomobject]@{ Result = 'FixtureInvoked'; Bound = $PSBoundParameters }
-'@
-        Set-Content -LiteralPath (Join-Path $script:LauncherFixtureRoot 'New-EASubscriptionCrossTenant.v2.ps1') -Value $fixtureCore
-    }
-    BeforeEach {
-        $script:LauncherParameters = @{
-            EATenantId = '11111111-1111-4111-8111-111111111111'
-            TargetTenantId = '22222222-2222-4222-8222-222222222222'
-            SourceApplicationId = '33333333-3333-4333-8333-333333333333'
-            TargetApplicationId = '44444444-4444-4444-8444-444444444444'
-            TargetOwnerObjectId = '66666666-6666-4666-8666-666666666666'
-            SourceCertificateThumbprint = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
-            TargetCertificateThumbprint = 'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
-            BillingAccountId = '1234567'; EnrollmentAccountId = '7654321'
-            SubscriptionName = 'EA launcher test'; AliasName = 'ea-launcher-001'
-        }
-        $script:LauncherCertificateCase = 'Valid'
-        $script:LauncherTargetLoginFails = $false
-        Mock Get-Item {
-            param($LiteralPath)
-            if ($LauncherCertificateCase -eq 'MissingTarget' -and $LiteralPath.EndsWith('B' * 40)) {
-                throw 'Synthetic missing destination certificate'
-            }
-            [pscustomobject]@{
-                HasPrivateKey = $LauncherCertificateCase -ne 'NoPrivateKey'
-                NotBefore = if ($LauncherCertificateCase -eq 'Future') { [datetime]::UtcNow.AddDays(1) } else { [datetime]::UtcNow.AddDays(-1) }
-                NotAfter = if ($LauncherCertificateCase -eq 'Expired') { [datetime]::UtcNow.AddDays(-1) } else { [datetime]::UtcNow.AddDays(1) }
-            }
-        } -ParameterFilter { $LiteralPath -like 'Cert:\CurrentUser\My\*' }
-        Mock Disable-AzContextAutosave {}
-        Mock Connect-AzAccount {
-            param($ApplicationId, $Tenant)
-            if ($LauncherTargetLoginFails -and $Tenant -eq $LauncherParameters.TargetTenantId) {
-                throw 'Synthetic destination authentication failure'
-            }
-            [pscustomobject]@{ Context = [pscustomobject]@{
-                Environment = @{ Name = 'AzureCloud' }; Tenant = @{ Id = $Tenant }
-                Account = @{ Type = 'ServicePrincipal'; Id = $ApplicationId }
-            } }
-        }
-        Mock Get-AzAccessToken { throw 'Unmocked token acquisition' }
-        Mock Invoke-WebRequest { throw 'Unmocked HTTP call' }
-    }
 
-    It 'makes no certificate, login or HTTP calls for WhatIf' {
-        & $script:LauncherUnderTest @LauncherParameters -WhatIf
-        Should -Invoke Get-Item -Times 0 -Exactly -ParameterFilter { $LiteralPath -like 'Cert:\*' }
-        Should -Invoke Connect-AzAccount -Times 0 -Exactly
-        Should -Invoke Disable-AzContextAutosave -Times 0 -Exactly
-        Should -Invoke Get-AzAccessToken -Times 0 -Exactly
-        Should -Invoke Invoke-WebRequest -Times 0 -Exactly
-    }
-    It 'authenticates both principals and defaults to CreateAndAccept without prompting' {
-        $result = & $script:LauncherUnderTest @LauncherParameters -Confirm:$false
-        $result.Result | Should -Be 'FixtureInvoked'
-        $result.Bound.Mode | Should -Be 'CreateAndAccept'
-        $result.Bound.Confirm | Should -BeFalse
-        $result.Bound.SourceContext.Tenant.Id | Should -Be $LauncherParameters.EATenantId
-        $result.Bound.TargetContext.Tenant.Id | Should -Be $LauncherParameters.TargetTenantId
-        $result.Bound.SourceContext.Account.Id | Should -Be $LauncherParameters.SourceApplicationId
-        $result.Bound.TargetContext.Account.Id | Should -Be $LauncherParameters.TargetApplicationId
-        $result.Bound.TargetOwnerObjectId.ToString() | Should -Be $LauncherParameters.TargetOwnerObjectId
-        Should -Invoke Disable-AzContextAutosave -Times 1 -Exactly -ParameterFilter { $Scope -eq 'Process' }
-        Should -Invoke Connect-AzAccount -Times 1 -Exactly -ParameterFilter {
-            $ServicePrincipal -and $SkipContextPopulation -and $Scope -eq 'Process' -and
-            $Tenant -eq $LauncherParameters.EATenantId -and $CertificateThumbprint -eq $LauncherParameters.SourceCertificateThumbprint
-        }
-        Should -Invoke Connect-AzAccount -Times 1 -Exactly -ParameterFilter {
-            $ServicePrincipal -and $SkipContextPopulation -and $Scope -eq 'Process' -and
-            $Tenant -eq $LauncherParameters.TargetTenantId -and $CertificateThumbprint -eq $LauncherParameters.TargetCertificateThumbprint
-        }
-    }
-    It 'forwards <RequestedMode> with the same alias and request inputs' -ForEach @(
-        @{ RequestedMode = 'Resume' }, @{ RequestedMode = 'Verify' }, @{ RequestedMode = 'Validate' }
-    ) {
-        $result = & $script:LauncherUnderTest @LauncherParameters -Mode $RequestedMode -Workload DevTest -TimeoutMinutes 7 -Confirm:$false
-        $result.Bound.Mode | Should -Be $RequestedMode
-        $result.Bound.AliasName | Should -Be $LauncherParameters.AliasName
-        $result.Bound.SubscriptionName | Should -Be $LauncherParameters.SubscriptionName
-        $result.Bound.BillingAccountId | Should -Be $LauncherParameters.BillingAccountId
-        $result.Bound.EnrollmentAccountId | Should -Be $LauncherParameters.EnrollmentAccountId
-        $result.Bound.Workload | Should -Be 'DevTest'
-        $result.Bound.TimeoutMinutes | Should -Be 7
-    }
-    It 'checks the destination certificate before authenticating either principal' {
-        $script:LauncherCertificateCase = 'MissingTarget'
-        { & $script:LauncherUnderTest @LauncherParameters -Confirm:$false } | Should -Throw '*missing destination certificate*'
-        Should -Invoke Connect-AzAccount -Times 0 -Exactly
-    }
-    It 'rejects <CertificateCase> certificates before login' -ForEach @(
-        @{ CertificateCase = 'NoPrivateKey' }, @{ CertificateCase = 'Expired' }, @{ CertificateCase = 'Future' }
-    ) {
-        $script:LauncherCertificateCase = $CertificateCase
-        { & $script:LauncherUnderTest @LauncherParameters -Confirm:$false } | Should -Throw '*private key and be currently valid*'
-        Should -Invoke Connect-AzAccount -Times 0 -Exactly
-    }
-    It 'does not invoke the core if destination login fails' {
-        $script:LauncherTargetLoginFails = $true
-        { & $script:LauncherUnderTest @LauncherParameters -Confirm:$false } | Should -Throw '*destination authentication failure*'
-        Should -Invoke Connect-AzAccount -Times 2 -Exactly
-        Should -Invoke Invoke-WebRequest -Times 0 -Exactly
-    }
-    It 'rejects identical tenants before login' {
-        $LauncherParameters.TargetTenantId = $LauncherParameters.EATenantId
-        { & $script:LauncherUnderTest @LauncherParameters -Confirm:$false } | Should -Throw '*distinct tenants*'
-        Should -Invoke Connect-AzAccount -Times 0 -Exactly
-    }
-    It 'retains the alias in diagnostics and does not retry a failed core invocation' {
-        $LauncherParameters.AliasName = 'fixture-failure'
-        $warnings = @()
-        try { & $script:LauncherUnderTest @LauncherParameters -Confirm:$false -WarningVariable warnings -WarningAction SilentlyContinue } catch {
-            $_.Exception.Message | Should -Be 'Synthetic core failure'
-        }
-        @($warnings).Count | Should -Be 1
-        $warnings[0].ToString() | Should -BeLike "*fixture-failure*replacement alias*"
-        Should -Invoke Connect-AzAccount -Times 2 -Exactly
-    }
-}
 
 Describe 'EA native Automation runbook' {
     BeforeAll {
