@@ -460,7 +460,7 @@ Describe 'EA native Automation runbook' {
                 } elseif ($null -eq $CloudFixture.Record) { $fixtureCode = 404 }
                 else { $fixtureData = $CloudFixture.Record }
             } elseif ($fixtureUri.Host -eq 'graph.microsoft.com') {
-                $fixtureSource = $Uri.Contains($CloudFixtureSettings.sourceApplicationId)
+                $fixtureSource = ([string]$Uri).Contains($CloudFixtureSettings.sourceApplicationId)
                 $fixtureData = @{
                     id = if ($fixtureSource) { '77777777-7777-4777-8777-777777777777' } else { $CloudFixtureSettings.targetOwnerObjectId }
                     appId = if ($fixtureSource) { $CloudFixtureSettings.sourceApplicationId } else { $CloudFixtureSettings.targetApplicationId }
