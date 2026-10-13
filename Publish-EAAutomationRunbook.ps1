@@ -12,7 +12,11 @@ $engineTokens = $null
 $engineErrors = $null
 $engineAst = [Management.Automation.Language.Parser]::ParseInput($engine, [ref]$engineTokens, [ref]$engineErrors)
 if ($engineErrors.Count -or $null -eq $engineAst.ParamBlock) { throw 'Engine source is invalid.' }
-$engine = $engine.Substring($engineAst.ParamBlock.Extent.StartOffset)
+$engineStart = $engineAst.ParamBlock.Extent.StartOffset
+foreach ($attribute in $engineAst.ParamBlock.Attributes) {
+    $engineStart = [math]::Min($engineStart, $attribute.Extent.StartOffset)
+}
+$engine = $engine.Substring($engineStart)
 if ([regex]::Matches($template, '__EA_ENGINE__').Count -ne 1) { throw 'Template must have exactly one engine marker.' }
 $artifact = $template.Replace('__EA_ENGINE__', $engine)
 $parseTokens = $null

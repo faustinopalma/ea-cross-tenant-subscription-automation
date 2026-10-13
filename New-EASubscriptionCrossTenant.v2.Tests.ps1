@@ -12,12 +12,12 @@ BeforeAll {
     }
     function New-FakeAlias {
         $scope = '/billingAccounts/1234567/enrollmentAccounts/7654321'
-        $owner = $script:P.TargetOwnerObjectId
-        if ($script:Scenario -eq 'WrongAlias') { $owner = '99999999-9999-4999-8999-999999999999' }
+        $owner = $EAEngineFixture.P.TargetOwnerObjectId
+        if ($EAEngineFixture.Scenario -eq 'WrongAlias') { $owner = '99999999-9999-4999-8999-999999999999' }
         # This fixture follows the GET response contract, not the PUT request body.
         return @{ properties = @{
-            billingScope = $scope; displayName = $script:P.SubscriptionName; workload = 'Production'
-            subscriptionOwnerId = $owner; subscriptionId = $script:SubId
+            billingScope = $scope; displayName = $EAEngineFixture.P.SubscriptionName; workload = 'Production'
+            subscriptionOwnerId = $owner; subscriptionId = $EAEngineFixture.SubId
             provisioningState = 'Accepted'; acceptOwnershipState = 'Pending'
         } }
     }
@@ -44,13 +44,17 @@ Describe 'EA cross-tenant subscription v2' {
             BillingAccountId = '1234567'; EnrollmentAccountId = '7654321'
             SubscriptionName = 'EA test'; AliasName = 'ea-test-001'
         }
-        $script:Scenario = 'Normal'
-        $script:Exists = $false
-        $script:Accepted = $false
-        $script:StatusReads = 0
-        $script:AliasReads = 0
-        $script:FinalReads = 0
-        $script:Calls = [System.Collections.Generic.List[object]]::new()
+        $script:EAEngineFixture = @{
+            P = $script:P; SourceTenant = $script:SourceTenant; TargetTenant = $script:TargetTenant
+            SourceApp = $script:SourceApp; TargetApp = $script:TargetApp; SubId = $script:SubId
+        }
+        $EAEngineFixture.Scenario = 'Normal'
+        $EAEngineFixture.Exists = $false
+        $EAEngineFixture.Accepted = $false
+        $EAEngineFixture.StatusReads = 0
+        $EAEngineFixture.AliasReads = 0
+        $EAEngineFixture.FinalReads = 0
+        $EAEngineFixture.Calls = [System.Collections.Generic.List[object]]::new()
         Mock Start-Sleep {}
         Mock Get-AzAccessToken {
             param($ResourceUrl, $TenantId)
@@ -60,56 +64,56 @@ Describe 'EA cross-tenant subscription v2' {
         Mock Invoke-WebRequest {
             param($Uri, $Method, $Body, $Token)
             $u = [string]$Uri
-            $script:Calls.Add(@{ Uri = $u; Method = [string]$Method; Body = $Body
+            $EAEngineFixture.Calls.Add(@{ Uri = $u; Method = [string]$Method; Body = $Body
                 MockToken = (ConvertFrom-SecureString $Token -AsPlainText) })
             if ($u -like 'https://graph.microsoft.com/*') {
-                $isSource = $u.Contains($script:SourceApp)
-                $principalHomeTenant = if ($isSource) { $script:SourceTenant } else { $script:TargetTenant }
-                $id = if ($isSource) { '77777777-7777-4777-8777-777777777777' } else { $script:P.TargetOwnerObjectId }
-                if ($isSource -and $script:Scenario -eq 'ForeignHome') { $principalHomeTenant = $script:TargetTenant }
-                if (-not $isSource -and $script:Scenario -eq 'WrongTargetIdentity') {
+                $isSource = $u.Contains($EAEngineFixture.SourceApp)
+                $principalHomeTenant = if ($isSource) { $EAEngineFixture.SourceTenant } else { $EAEngineFixture.TargetTenant }
+                $id = if ($isSource) { '77777777-7777-4777-8777-777777777777' } else { $EAEngineFixture.P.TargetOwnerObjectId }
+                if ($isSource -and $EAEngineFixture.Scenario -eq 'ForeignHome') { $principalHomeTenant = $EAEngineFixture.TargetTenant }
+                if (-not $isSource -and $EAEngineFixture.Scenario -eq 'WrongTargetIdentity') {
                     $id = '99999999-9999-4999-8999-999999999999'
                 }
-                if ($script:Scenario -eq 'GraphForbidden') { return New-FakeResponse 403 @{ error = @{ code = 'Authorization_RequestDenied' } } }
-                $app = if ($isSource) { $script:SourceApp } else { $script:TargetApp }
+                if ($EAEngineFixture.Scenario -eq 'GraphForbidden') { return New-FakeResponse 403 @{ error = @{ code = 'Authorization_RequestDenied' } } }
+                $app = if ($isSource) { $EAEngineFixture.SourceApp } else { $EAEngineFixture.TargetApp }
                 return New-FakeResponse 200 @{ id = $id; appId = $app; appOwnerOrganizationId = $principalHomeTenant; servicePrincipalType = 'Application' }
             }
             if ($u -like '*/aliases/*') {
                 if ($Method -eq 'PUT') {
-                    if ($script:Scenario -eq 'PutTransportFailure') { throw 'Simulated connection loss' }
-                    $script:Exists = $true
+                    if ($EAEngineFixture.Scenario -eq 'PutTransportFailure') { throw 'Simulated connection loss' }
+                    $EAEngineFixture.Exists = $true
                     return New-FakeResponse 201 (New-FakeAlias)
                 }
-                $script:AliasReads++
-                if ($script:Scenario -eq 'AliasForbidden') { return New-FakeResponse 403 @{ error = @{ code = 'AuthorizationFailed' } } }
-                if ($script:Scenario -eq 'Throttled' -and $script:AliasReads -eq 1) {
+                $EAEngineFixture.AliasReads++
+                if ($EAEngineFixture.Scenario -eq 'AliasForbidden') { return New-FakeResponse 403 @{ error = @{ code = 'AuthorizationFailed' } } }
+                if ($EAEngineFixture.Scenario -eq 'Throttled' -and $EAEngineFixture.AliasReads -eq 1) {
                     return New-FakeResponse 429 @{} @{ 'Retry-After' = '1' }
                 }
-                if ($script:Scenario -eq 'RetryAfterDeadline') {
+                if ($EAEngineFixture.Scenario -eq 'RetryAfterDeadline') {
                     return New-FakeResponse 429 @{} @{ 'Retry-After' = '9999' }
                 }
-                if (-not $script:Exists) { return New-FakeResponse 404 @{} }
+                if (-not $EAEngineFixture.Exists) { return New-FakeResponse 404 @{} }
                 return New-FakeResponse 200 (New-FakeAlias)
             }
             if ($u -like '*/acceptOwnershipStatus?*') {
-                $script:StatusReads++
-                $tenant = if ($script:Scenario -eq 'WrongStatusTenant') { $script:SourceTenant } else { $script:TargetTenant }
-                $ownership = if ($script:Accepted) { 'Completed' } else { 'Pending' }
-                $provisioning = if ($script:Accepted) { 'Succeeded' } else { 'Accepted' }
-                if ($script:Scenario -eq 'Expired') { $ownership = 'Expired' }
-                return New-FakeResponse 200 @{ subscriptionId = $script:SubId; subscriptionTenantId = $tenant
+                $EAEngineFixture.StatusReads++
+                $tenant = if ($EAEngineFixture.Scenario -eq 'WrongStatusTenant') { $EAEngineFixture.SourceTenant } else { $EAEngineFixture.TargetTenant }
+                $ownership = if ($EAEngineFixture.Accepted) { 'Completed' } else { 'Pending' }
+                $provisioning = if ($EAEngineFixture.Accepted) { 'Succeeded' } else { 'Accepted' }
+                if ($EAEngineFixture.Scenario -eq 'Expired') { $ownership = 'Expired' }
+                return New-FakeResponse 200 @{ subscriptionId = $EAEngineFixture.SubId; subscriptionTenantId = $tenant
                     acceptOwnershipState = $ownership; provisioningState = $provisioning }
             }
             if ($u -like '*/acceptOwnership?*') {
-                if ($script:Scenario -eq 'PostTransportFailure') { throw 'Simulated connection loss' }
-                $script:Accepted = $true
+                if ($EAEngineFixture.Scenario -eq 'PostTransportFailure') { throw 'Simulated connection loss' }
+                $EAEngineFixture.Accepted = $true
                 return New-FakeResponse 202 @{} @{ 'Retry-After' = '1' }
             }
             if ($u -like 'https://management.azure.com/subscriptions/*') {
-                $script:FinalReads++
-                if ($script:Scenario -eq 'Propagation' -and $script:FinalReads -eq 1) { return New-FakeResponse 403 @{} }
-                $tenant = if ($script:Scenario -eq 'WrongFinalTenant') { $script:SourceTenant } else { $script:TargetTenant }
-                return New-FakeResponse 200 @{ subscriptionId = $script:SubId; tenantId = $tenant; state = 'Enabled' }
+                $EAEngineFixture.FinalReads++
+                if ($EAEngineFixture.Scenario -eq 'Propagation' -and $EAEngineFixture.FinalReads -eq 1) { return New-FakeResponse 403 @{} }
+                $tenant = if ($EAEngineFixture.Scenario -eq 'WrongFinalTenant') { $EAEngineFixture.SourceTenant } else { $EAEngineFixture.TargetTenant }
+                return New-FakeResponse 200 @{ subscriptionId = $EAEngineFixture.SubId; tenantId = $tenant; state = 'Enabled' }
             }
             throw "Unmocked request: $Method $u"
         }
@@ -129,7 +133,7 @@ Describe 'EA cross-tenant subscription v2' {
         $result = & $script:UnderTest @P
         $result.Result | Should -Be 'ReadOnlyChecksPassed'
         $result.CreationPermissionVerified | Should -BeFalse
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'rejects user contexts including guests before any API call' {
         $P.SourceContext.Account.Type = 'User'
@@ -142,30 +146,30 @@ Describe 'EA cross-tenant subscription v2' {
         Should -Invoke Invoke-WebRequest -Times 0 -Exactly
     }
     It 'rejects an application registered outside the source tenant' {
-        $script:Scenario = 'ForeignHome'
+        $EAEngineFixture.Scenario = 'ForeignHome'
         { & $script:UnderTest @P -Mode CreateAndAccept } | Should -Throw '*not registered*'
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'rejects the wrong target owner before creation' {
-        $script:Scenario = 'WrongTargetIdentity'
+        $EAEngineFixture.Scenario = 'WrongTargetIdentity'
         { & $script:UnderTest @P -Mode CreateAndAccept } | Should -Throw '*TargetOwnerObjectId*'
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'fails closed when the Graph home-tenant check is unavailable' {
-        $script:Scenario = 'GraphForbidden'
+        $EAEngineFixture.Scenario = 'GraphForbidden'
         { & $script:UnderTest @P -Mode CreateAndAccept } | Should -Throw '*HTTP 403*'
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'never treats alias 403 as not found' {
-        $script:Scenario = 'AliasForbidden'
+        $EAEngineFixture.Scenario = 'AliasForbidden'
         { & $script:UnderTest @P -Mode CreateAndAccept } | Should -Throw '*HTTP 403*'
-        @($script:Calls | Where-Object Method -eq 'PUT').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -eq 'PUT').Count | Should -Be 0
     }
     It 'uses source tokens for creation and target tokens for acceptance and final verification' {
         $result = & $script:UnderTest @P -Mode CreateAndAccept -Confirm:$false
         $result.Result | Should -Be 'Succeeded'
-        $put = @($script:Calls | Where-Object Method -eq 'PUT')
-        $post = @($script:Calls | Where-Object Method -eq 'POST')
+        $put = @($EAEngineFixture.Calls | Where-Object Method -eq 'PUT')
+        $post = @($EAEngineFixture.Calls | Where-Object Method -eq 'POST')
         $put.Count | Should -Be 1
         $post.Count | Should -Be 1
         $put[0].MockToken | Should -Be "$script:SourceTenant|https://management.azure.com/"
@@ -173,82 +177,82 @@ Describe 'EA cross-tenant subscription v2' {
         $payload = $put[0].Body | ConvertFrom-Json
         $payload.properties.additionalProperties.subscriptionTenantId | Should -Be $script:TargetTenant
         $payload.properties.additionalProperties.subscriptionOwnerId | Should -Be $P.TargetOwnerObjectId
-        $script:StatusReads | Should -BeGreaterThan 1
-        $script:FinalReads | Should -Be 1
+        $EAEngineFixture.StatusReads | Should -BeGreaterThan 1
+        $EAEngineFixture.FinalReads | Should -Be 1
     }
     It 'resumes the documented flat alias response without another PUT' {
-        $script:Exists = $true
+        $EAEngineFixture.Exists = $true
         $result = & $script:UnderTest @P -Mode Resume -Confirm:$false
         $result.Result | Should -Be 'Succeeded'
-        @($script:Calls | Where-Object Method -eq 'PUT').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -eq 'PUT').Count | Should -Be 0
     }
     It 'refuses to create a second subscription for an existing alias' {
-        $script:Exists = $true
+        $EAEngineFixture.Exists = $true
         { & $script:UnderTest @P -Mode CreateAndAccept } | Should -Throw '*already exists*'
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'does not create an alias while resuming a missing request' {
         { & $script:UnderTest @P -Mode Resume } | Should -Throw '*Alias not found*'
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'rejects a mismatching existing owner' {
-        $script:Exists = $true; $script:Scenario = 'WrongAlias'
+        $EAEngineFixture.Exists = $true; $EAEngineFixture.Scenario = 'WrongAlias'
         { & $script:UnderTest @P -Mode Resume } | Should -Throw '*Alias does not match*'
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'rejects a different target tenant before accepting ownership' {
-        $script:Exists = $true; $script:Scenario = 'WrongStatusTenant'
+        $EAEngineFixture.Exists = $true; $EAEngineFixture.Scenario = 'WrongStatusTenant'
         { & $script:UnderTest @P -Mode Resume } | Should -Throw '*Ownership status does not match*'
-        @($script:Calls | Where-Object Method -eq 'POST').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -eq 'POST').Count | Should -Be 0
     }
     It 'does not accept an expired request' {
-        $script:Exists = $true; $script:Scenario = 'Expired'
+        $EAEngineFixture.Exists = $true; $EAEngineFixture.Scenario = 'Expired'
         { & $script:UnderTest @P -Mode Resume } | Should -Throw '*expired*'
-        @($script:Calls | Where-Object Method -eq 'POST').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -eq 'POST').Count | Should -Be 0
     }
     It 'verifies a pending request without modifying it' {
-        $script:Exists = $true
+        $EAEngineFixture.Exists = $true
         $result = & $script:UnderTest @P -Mode Verify
         $result.Result | Should -Be 'NotCompleted'
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'does not accept ownership twice after completion' {
-        $script:Exists = $true; $script:Accepted = $true
+        $EAEngineFixture.Exists = $true; $EAEngineFixture.Accepted = $true
         $result = & $script:UnderTest @P -Mode Resume
         $result.Result | Should -Be 'Succeeded'
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'does not retry an ambiguous PUT transport failure' {
-        $script:Scenario = 'PutTransportFailure'
+        $EAEngineFixture.Scenario = 'PutTransportFailure'
         { & $script:UnderTest @P -Mode CreateAndAccept -Confirm:$false } | Should -Throw '*Transport failure*'
-        @($script:Calls | Where-Object Method -eq 'PUT').Count | Should -Be 1
-        @($script:Calls | Where-Object Method -eq 'POST').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -eq 'PUT').Count | Should -Be 1
+        @($EAEngineFixture.Calls | Where-Object Method -eq 'POST').Count | Should -Be 0
     }
     It 'does not retry an ambiguous POST transport failure' {
-        $script:Exists = $true; $script:Scenario = 'PostTransportFailure'
+        $EAEngineFixture.Exists = $true; $EAEngineFixture.Scenario = 'PostTransportFailure'
         { & $script:UnderTest @P -Mode Resume -Confirm:$false } | Should -Throw '*Transport failure*'
-        @($script:Calls | Where-Object Method -eq 'POST').Count | Should -Be 1
+        @($EAEngineFixture.Calls | Where-Object Method -eq 'POST').Count | Should -Be 1
     }
     It 'retries a throttled GET and honors Retry-After' {
-        $script:Scenario = 'Throttled'
+        $EAEngineFixture.Scenario = 'Throttled'
         $result = & $script:UnderTest @P
         $result.Result | Should -Be 'ReadOnlyChecksPassed'
         Should -Invoke Start-Sleep -Times 1 -Exactly -ParameterFilter { $Seconds -eq 1 }
     }
     It 'waits for final subscription authorization propagation' {
-        $script:Exists = $true; $script:Accepted = $true; $script:Scenario = 'Propagation'
+        $EAEngineFixture.Exists = $true; $EAEngineFixture.Accepted = $true; $EAEngineFixture.Scenario = 'Propagation'
         $result = & $script:UnderTest @P -Mode Verify
         $result.Result | Should -Be 'Succeeded'
-        $script:FinalReads | Should -Be 2
+        $EAEngineFixture.FinalReads | Should -Be 2
     }
     It 'stops when Retry-After would exceed the polling deadline' {
-        $script:Scenario = 'RetryAfterDeadline'
+        $EAEngineFixture.Scenario = 'RetryAfterDeadline'
         { & $script:UnderTest @P -TimeoutMinutes 1 } | Should -Throw '*Polling deadline*'
         Should -Invoke Start-Sleep -Times 0 -Exactly
-        @($script:Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
+        @($EAEngineFixture.Calls | Where-Object Method -ne 'GET').Count | Should -Be 0
     }
     It 'does not report success for a subscription in the wrong actual tenant' {
-        $script:Exists = $true; $script:Accepted = $true; $script:Scenario = 'WrongFinalTenant'
+        $EAEngineFixture.Exists = $true; $EAEngineFixture.Accepted = $true; $EAEngineFixture.Scenario = 'WrongFinalTenant'
         { & $script:UnderTest @P -Mode Verify } | Should -Throw '*Final subscription identity or tenant*'
     }
 }
@@ -285,19 +289,19 @@ if ($AliasName -eq 'fixture-failure') { throw 'Synthetic core failure' }
         $script:LauncherTargetLoginFails = $false
         Mock Get-Item {
             param($LiteralPath)
-            if ($script:LauncherCertificateCase -eq 'MissingTarget' -and $LiteralPath.EndsWith('B' * 40)) {
+            if ($LauncherCertificateCase -eq 'MissingTarget' -and $LiteralPath.EndsWith('B' * 40)) {
                 throw 'Synthetic missing destination certificate'
             }
             [pscustomobject]@{
-                HasPrivateKey = $script:LauncherCertificateCase -ne 'NoPrivateKey'
-                NotBefore = if ($script:LauncherCertificateCase -eq 'Future') { [datetime]::UtcNow.AddDays(1) } else { [datetime]::UtcNow.AddDays(-1) }
-                NotAfter = if ($script:LauncherCertificateCase -eq 'Expired') { [datetime]::UtcNow.AddDays(-1) } else { [datetime]::UtcNow.AddDays(1) }
+                HasPrivateKey = $LauncherCertificateCase -ne 'NoPrivateKey'
+                NotBefore = if ($LauncherCertificateCase -eq 'Future') { [datetime]::UtcNow.AddDays(1) } else { [datetime]::UtcNow.AddDays(-1) }
+                NotAfter = if ($LauncherCertificateCase -eq 'Expired') { [datetime]::UtcNow.AddDays(-1) } else { [datetime]::UtcNow.AddDays(1) }
             }
         } -ParameterFilter { $LiteralPath -like 'Cert:\CurrentUser\My\*' }
         Mock Disable-AzContextAutosave {}
         Mock Connect-AzAccount {
             param($ApplicationId, $Tenant)
-            if ($script:LauncherTargetLoginFails -and $Tenant -eq $script:LauncherParameters.TargetTenantId) {
+            if ($LauncherTargetLoginFails -and $Tenant -eq $LauncherParameters.TargetTenantId) {
                 throw 'Synthetic destination authentication failure'
             }
             [pscustomobject]@{ Context = [pscustomobject]@{
@@ -552,6 +556,7 @@ Describe 'EA Automation infrastructure security' {
             param([hashtable]$Template)
             $items = if ($Template.resources -is [Collections.IDictionary]) { $Template.resources.Values } else { $Template.resources }
             foreach ($item in $items) {
+                if ($item.existing -or $item.copy) { continue }
                 $item
                 if ($item.type -eq 'Microsoft.Resources/deployments' -and $item.properties.template) {
                     Get-InfrastructureResources $item.properties.template
