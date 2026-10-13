@@ -78,7 +78,7 @@ Documentation reviewed on **October 9, 2026**.
 
 ## 1. Local Testing Without Azure
 
-Open `pwsh` in the repository directory. Install modules from an approved source and run the parser and mocked tests:
+Open PowerShell 7.4+ in the repository directory. Install modules from an approved source and run the parser and mocked tests:
 
 ```powershell
 Install-Module Az.Accounts -Scope CurrentUser

@@ -13,6 +13,8 @@ $VerbosePreference = 'SilentlyContinue'
 $DebugPreference = 'SilentlyContinue'
 $cloudSettings = Get-AutomationVariable -Name 'EA-Configuration'
 if ($cloudSettings -is [string]) { $cloudSettings = ConvertFrom-Json $cloudSettings -AsHashtable }
+else { $cloudSettings = ConvertFrom-Json (ConvertTo-Json $cloudSettings -Depth 10) -AsHashtable }
+if ($cloudSettings -isnot [Collections.IDictionary]) { throw 'EA-Configuration must contain an object.' }
 foreach ($key in @('eaTenantId', 'targetTenantId', 'sourceApplicationId', 'targetApplicationId', 'targetOwnerObjectId')) {
     if ([guid]$cloudSettings[$key] -eq [guid]::Empty) { throw "Invalid configuration field: $key" }
 }

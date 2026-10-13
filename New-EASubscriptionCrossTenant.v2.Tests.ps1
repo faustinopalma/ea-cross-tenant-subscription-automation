@@ -1,4 +1,4 @@
-#requires -Version 7.2
+#requires -Version 7.4
 #requires -Modules Az.Accounts, @{ ModuleName = 'Pester'; ModuleVersion = '5.0.0' }
 # These tests replace token acquisition and ALL HTTP calls. They never contact Azure.
 # They validate local control flow, not the real service's authorization or behavior.
@@ -419,9 +419,13 @@ Describe 'EA native Automation runbook' {
         $script:CloudFixture = @{
             Record = $null; LeaseHeld = $false; AliasExists = $false; Accepted = $false
             Writes = 0; FailWrite = $false; InvalidCertificate = $false
+            SettingsAsObject = $false
             SubId = '55555555-5555-4555-8555-555555555555'
         }
-        Mock Get-AutomationVariable { $CloudFixtureSettings }
+        Mock Get-AutomationVariable {
+            if ($CloudFixture.SettingsAsObject) { [pscustomobject]$CloudFixtureSettings }
+            else { $CloudFixtureSettings }
+        }
         Mock Get-AutomationCertificate {
             $fakeCertificate = [pscustomobject]@{
                 HasPrivateKey = -not $CloudFixture.InvalidCertificate
@@ -502,6 +506,12 @@ Describe 'EA native Automation runbook' {
         $result = & $CloudArtifact -SubscriptionName 'Cloud fixture' -AliasName 'cloud-fixture' -Mode Validate
         $result.Result | Should -Be 'ReadOnlyChecksPassed'
         $CloudFixture.Record | Should -BeNullOrEmpty
+        $CloudFixture.Writes | Should -Be 0
+    }
+    It 'accepts an object-valued Automation configuration' {
+        $CloudFixture.SettingsAsObject = $true
+        $result = & $CloudArtifact -SubscriptionName 'Cloud fixture' -AliasName 'cloud-fixture' -Mode Validate
+        $result.Result | Should -Be 'ReadOnlyChecksPassed'
         $CloudFixture.Writes | Should -Be 0
     }
     It 'creates, accepts, verifies and persists the result under a lease' {

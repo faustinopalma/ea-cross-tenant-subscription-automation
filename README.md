@@ -99,7 +99,7 @@ An interrupted job can leave its infinite-duration lease held. Run `Verify`, sto
 
 ## Local Evaluation
 
-Use a dedicated Windows PowerShell 7.2+ session, `Az.Accounts` 5.3.1+, Pester 5, and approved script execution/signing policy. Follow [TESTING-AND-EVIDENCE.md](TESTING-AND-EVIDENCE.md) for setup and invocation: offline `WhatIf`, read-only `Validate`, then an approved `CreateAndAccept` run. Creation produces a real, billable subscription.
+Use a dedicated Windows PowerShell 7.4+ session, `Az.Accounts` 5.3.1+, Pester 5, and approved script execution/signing policy. Follow [TESTING-AND-EVIDENCE.md](TESTING-AND-EVIDENCE.md) for setup and invocation: offline `WhatIf`, read-only `Validate`, then an approved `CreateAndAccept` run. Creation produces a real, billable subscription.
 
 ```powershell
 bicep build infra/main.bicep --outfile build/main.json
